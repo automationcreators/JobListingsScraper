@@ -478,16 +478,67 @@ class AdvancedJobClassifier:
         return min(confidence, 1.0)
 
     def is_address(self, text: str) -> bool:
-        """Check if text is primarily an address."""
+        """Check if text is primarily an address, considering job posting context."""
         if not text:
             return False
             
         text = str(text).strip()
         
-        # Check for address patterns
+        # Job posting context indicators - if these are present, it's NOT just an address
+        job_posting_indicators = [
+            r'\bjobs?\s+available\s+in\b',  # "jobs available in"
+            r'\bjobs?\s+in\b',  # "jobs in"
+            r'\bpositions?\s+available\s+in\b',  # "positions available in"
+            r'\bpositions?\s+in\b',  # "positions in"
+            r'\bhiring\s+in\b',  # "hiring in"
+            r'\bopportunities\s+in\b',  # "opportunities in"
+            r'\bapply\s+to\b',  # Contains "apply to"
+            r'\bon\s+indeed\.com\b',  # On job sites
+            r'\bmissing:\s*\d+[A-Z]+\b',  # Missing location codes
+            r'\bshow\s+results\s+with\b'  # Show results with
+        ]
+        
+        # If text contains job posting indicators, it's NOT just an address
+        for indicator in job_posting_indicators:
+            if re.search(indicator, text, re.IGNORECASE):
+                return False
+        
+        # Additional check: if text contains numbers followed by job-related terms, it's not an address
+        job_quantity_patterns = [
+            r'\b\d+\s+[A-Za-z\s]*?(?:jobs?|positions?|openings?)\b',  # "185 Airport jobs"
+            r'\b\d+\s+[A-Za-z\s]*?(?:technician|mechanic|specialist|assistant|manager|pilot|driver)\b'
+        ]
+        
+        for pattern in job_quantity_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                return False
+        
+        # Now check for address patterns only if no job context was found
+        address_match_count = 0
         for pattern in self.address_patterns:
             if re.search(pattern, text, re.IGNORECASE):
+                address_match_count += 1
+        
+        # Require multiple address pattern matches OR specific standalone address patterns
+        # to avoid false positives from job postings that mention locations
+        standalone_address_patterns = [
+            r'^\d+\s+[A-Za-z\s]+(road|rd|street|st|avenue|ave|drive|dr|lane|ln|boulevard|blvd)',  # Starts with street address
+            r'\bemail:\s*[A-Za-z\s]+::\b',  # Email pattern
+            r'^\d{5}\s*::\b'  # Starts with ZIP code
+        ]
+        
+        # Check for standalone address patterns (high confidence)
+        for pattern in standalone_address_patterns:
+            if re.search(pattern, text, re.IGNORECASE):
                 return True
+        
+        # Special check for email/contact patterns
+        if re.search(r'\bemail:\s*[A-Za-z\s:]+::\b', text, re.IGNORECASE) or re.search(r'\d{5}\s*::\b', text, re.IGNORECASE):
+            return True
+        
+        # For other patterns, require the text to be short and primarily address-focused
+        if address_match_count > 0 and len(text) < 100 and not re.search(r'\b(?:job|position|work|career|employment|hiring|apply)\b', text, re.IGNORECASE):
+            return True
         
         return False
 

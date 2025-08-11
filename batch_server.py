@@ -160,7 +160,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         </button>
                     </div>
                 </div>
-                <div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 4px; font-size: 0.85em;">
+                <div id="export-info" style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 4px; font-size: 0.85em;">
                     <strong>ℹ️ Export Information:</strong><br>
                     • <strong>Complete CSV</strong>: Includes all original columns plus new processed columns (job_title, job_category, general_category, confidence, job_details, etc.)<br>
                     • <strong>Processed Only</strong>: Contains only the classification results without original data
@@ -313,8 +313,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     
                     showAlert(`✅ ${actionType} completed! Processed ${result.summary.total_processed} rows`, 'success');
                     
-                    if (!isTest) {
-                        document.getElementById('download-section').classList.remove('hidden');
+                    // Show export section for both test and full processing
+                    document.getElementById('download-section').classList.remove('hidden');
+                    
+                    // Update export section title and info based on test vs full processing
+                    const exportTitle = document.querySelector('#download-section h4');
+                    const exportInfo = document.getElementById('export-info');
+                    if (isTest) {
+                        exportTitle.textContent = '📥 Export Test Results';
+                        exportInfo.innerHTML = `
+                            <strong>🧪 Test Results Export:</strong><br>
+                            • <strong>Complete CSV</strong>: Original data + processed columns for the tested range<br>
+                            • <strong>Processed Only</strong>: Just the classification results for the tested range<br>
+                            <em>Note: This is test data only. Use "Process Batch" for full dataset processing.</em>
+                        `;
+                    } else {
+                        exportTitle.textContent = '📥 Export Options';
+                        exportInfo.innerHTML = `
+                            <strong>ℹ️ Export Information:</strong><br>
+                            • <strong>Complete CSV</strong>: Includes all original columns plus new processed columns (job_title, job_category, general_category, confidence, job_details, etc.)<br>
+                            • <strong>Processed Only</strong>: Contains only the classification results without original data
+                        `;
                     }
                 } else {
                     showAlert(`❌ ${actionType} failed: ${result.error || 'Unknown error'}`, 'error');
@@ -546,12 +565,13 @@ async def process_range(
             result = classifier.process_row(text, row_id, job_id)
             results.append(result)
         
-        # Add results to dataframe if not test
-        if not is_test:
-            results_df = pd.DataFrame(results)
-            output_columns = ['extracted_job_title', 'job_category', 'general_category', 'confidence', 'original_content', 'job_details', 'row_id']
-            if job_id_column:
-                output_columns.append('job_id')
+        # Store results for export (both test and full processing)
+        results_df = pd.DataFrame(results)
+        output_columns = ['extracted_job_title', 'job_category', 'general_category', 'confidence', 'original_content', 'job_details', 'row_id']
+        if job_id_column:
+            output_columns.append('job_id')
+        
+        # Always store data for export, but mark if it's test data
                 
             for col in output_columns:
                 if col in results_df.columns:
