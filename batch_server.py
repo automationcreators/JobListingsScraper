@@ -94,6 +94,39 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .action-btn.success { background: #28a745; color: white; }
         .action-btn.warning { background: #ffc107; color: #212529; }
         .action-btn.danger { background: #dc3545; color: white; }
+        
+        /* Progress Tracking Styles */
+        .batch-progress-container { margin: 20px 0; }
+        .progress-bar-container { background: #e9ecef; border-radius: 10px; height: 20px; margin: 10px 0; overflow: hidden; }
+        .progress-bar { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s ease; border-radius: 10px; }
+        .progress-bar.success { background: linear-gradient(90deg, #28a745 0%, #20c997 100%); }
+        .progress-bar.error { background: linear-gradient(90deg, #dc3545 0%, #e74c3c 100%); }
+        .progress-text { font-size: 0.85em; color: #6c757d; margin-top: 5px; text-align: center; }
+        .batch-progress-text { font-size: 0.9rem; color: #495057; margin: 5px 0; font-weight: 500; }
+        .progress-status { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+        .status-indicator { font-size: 1.2rem; }
+        .status-indicator.success { color: #28a745; }
+        .status-indicator.error { color: #dc3545; }
+        .status-indicator.processing { color: #667eea; animation: pulse 1.5s infinite; }
+        .status-indicator.cancelled { color: #6c757d; }
+        
+        /* Batch History Enhanced Styles */
+        .batch-item { padding: 12px; margin: 8px 0; border: 1px solid #dee2e6; border-radius: 6px; background: #fff; cursor: pointer; transition: all 0.2s ease; border-left: 4px solid #6c757d; }
+        .batch-item:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+        .batch-completed { border-left-color: #28a745 !important; }
+        .batch-error { border-left-color: #dc3545 !important; }
+        .batch-processing { border-left-color: #667eea !important; }
+        .batch-cancelled { border-left-color: #6c757d !important; }
+        .batch-header { display: flex; align-items: center; gap: 8px; font-weight: 500; margin-bottom: 5px; }
+        .batch-status-icon { font-size: 1.1em; min-width: 20px; text-align: center; }
+        .processing-spinner { animation: pulse 1.5s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .batch-info { flex: 1; }
+        .batch-meta { font-size: 0.8rem; color: #6c757d; }
+        .batch-actions { display: flex; gap: 5px; }
+        
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
@@ -202,6 +235,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let totalRowsCount = 0;
         let lastBatchConfig = null;
         let batchHistory = [];
+        let currentBatchId = null;
+        let progressInterval = null;
 
         function showAlert(message, type) {
             const container = document.getElementById('alert-container');
@@ -314,9 +349,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 is_test: isTest
             };
 
+            let batchId = null;
             if (!isTest) {
                 lastBatchConfig = config;
-                addToBatchHistory(config);
+                batchId = addToBatchHistory(config);
+                currentBatchId = batchId;
             }
 
             const formData = new FormData();
@@ -328,6 +365,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 const actionType = isTest ? 'Testing' : 'Processing';
                 showAlert(`🔄 ${actionType} rows ${startRow}-${endRow}...`, 'success');
                 
+                // Start progress tracking for non-test batches
+                if (!isTest && batchId) {
+                    startProgressTracking(batchId, startRow, endRow);
+                }
+                
                 const response = await fetch(endpoint, { 
                     method: 'POST', 
                     body: formData 
@@ -335,7 +377,17 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                 
                 const result = await response.json();
                 
+                // Stop progress tracking
+                if (!isTest && batchId) {
+                    stopProgressTracking();
+                }
+                
                 if (result.success) {
+                    // Complete batch tracking
+                    if (!isTest && batchId) {
+                        completeBatch(batchId, true);
+                    }
+                    
                     displayResults(result);
                     document.getElementById('results').classList.remove('hidden');
                     
@@ -364,24 +416,37 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                         `;
                     }
                 } else {
+                    if (!isTest && batchId) {
+                        completeBatch(batchId, false);
+                    }
                     showAlert(`❌ ${actionType} failed: ${result.error || 'Unknown error'}`, 'error');
                 }
             } catch (error) {
+                if (!isTest && batchId) {
+                    completeBatch(batchId, false);
+                    stopProgressTracking();
+                }
                 showAlert(`❌ Processing failed: ${error.message}`, 'error');
             }
         }
 
         function addToBatchHistory(config) {
             const timestamp = new Date().toLocaleTimeString();
+            const batchId = `batch_${Date.now()}`;
             batchHistory.unshift({
                 ...config,
-                timestamp: timestamp
+                timestamp: timestamp,
+                batchId: batchId,
+                status: 'processing',
+                progress: 0,
+                totalRows: config.end_row - config.start_row + 1
             });
             
             // Keep only last 10 batches
             batchHistory = batchHistory.slice(0, 10);
             
             updateBatchHistoryDisplay();
+            return batchId;
         }
 
         function updateBatchHistoryDisplay() {
@@ -397,12 +462,78 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             
             let html = '';
             batchHistory.forEach((batch, index) => {
-                html += `<div style="padding: 5px; border-bottom: 1px solid #ddd; cursor: pointer;" onclick="loadBatchConfig(${index})">`;
-                html += `<strong>${batch.timestamp}</strong> - Rows ${batch.start_row}-${batch.end_row}`;
+                const statusIcon = getStatusIcon(batch.status);
+                const progressPercent = batch.progress || 0;
+                
+                html += `<div class="batch-item batch-${batch.status}" onclick="loadBatchConfig(${index})">`;
+                html += `  <div class="batch-header">`;
+                html += `    <span class="batch-status-icon">${statusIcon}</span>`;
+                html += `    <strong>${batch.timestamp}</strong> - Rows ${batch.start_row}-${batch.end_row}`;
+                html += `  </div>`;
+                
+                // Add progress bar for processing status
+                if (batch.status === 'processing') {
+                    html += `  <div class="progress-bar-container">`;
+                    html += `    <div class="progress-bar" style="width: ${progressPercent}%"></div>`;
+                    html += `  </div>`;
+                    html += `  <div class="progress-text">${Math.round(progressPercent)}% complete</div>`;
+                }
+                
                 html += '</div>';
             });
             
             content.innerHTML = html;
+        }
+        
+        function getStatusIcon(status) {
+            switch(status) {
+                case 'completed': return '✅';
+                case 'error': return '❌';
+                case 'cancelled': return '❌';
+                case 'processing': return '<span class="processing-spinner">⚡</span>';
+                default: return '⏳';
+            }
+        }
+        
+        function updateBatchProgress(batchId, progress, status = 'processing') {
+            const batch = batchHistory.find(b => b.batchId === batchId);
+            if (batch) {
+                batch.progress = progress;
+                batch.status = status;
+                updateBatchHistoryDisplay();
+            }
+        }
+        
+        function completeBatch(batchId, success = true) {
+            const batch = batchHistory.find(b => b.batchId === batchId);
+            if (batch) {
+                batch.progress = 100;
+                batch.status = success ? 'completed' : 'error';
+                updateBatchHistoryDisplay();
+            }
+        }
+        
+        function startProgressTracking(batchId, startRow, endRow) {
+            currentBatchId = batchId;
+            const totalRows = endRow - startRow + 1;
+            let currentProgress = 0;
+            
+            // Simulate progress tracking (since we don't have real-time feedback from server)
+            progressInterval = setInterval(() => {
+                currentProgress += 5; // Increment progress
+                if (currentProgress >= 95) {
+                    currentProgress = 95; // Cap at 95% until actual completion
+                }
+                updateBatchProgress(batchId, currentProgress);
+            }, 200); // Update every 200ms
+        }
+        
+        function stopProgressTracking() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            currentBatchId = null;
         }
 
         function loadBatchConfig(index) {
