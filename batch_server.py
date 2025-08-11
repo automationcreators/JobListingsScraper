@@ -32,6 +32,9 @@ app = FastAPI(title="Batch Processing Job Classification System", version="3.0.0
 classifier = AdvancedJobClassifier(use_ai=False)
 processed_data = {}
 
+# Performance mode: reduce storage operations during processing for speed
+PERFORMANCE_MODE = True  # Set to False for maximum data safety, True for speed
+
 # Load existing sessions on startup
 try:
     existing_sessions = storage.list_sessions()
@@ -949,8 +952,9 @@ async def analyze_csv_file(file: UploadFile = File(...)):
             'original_columns': list(df.columns)  # Store original column list
         }
         
-        # Save session to persistent storage
-        storage.save_session(session_id, processed_data[session_id])
+        # Save session to persistent storage (only in safety mode for initial upload)
+        if not PERFORMANCE_MODE:
+            storage.save_session(session_id, processed_data[session_id])
         
         return {
             "success": True,
@@ -1026,12 +1030,7 @@ async def process_range(
             output_columns = [col for col in output_columns if col != 'job_id']
         
         # Always store data for export, but mark if it's test data
-                
-            for col in output_columns:
-                if col in results_df.columns:
-                    range_df[col] = results_df[col]
-            
-            # Store/update processed data
+        # Store/update processed data
             if 'processed_df' not in processed_data[session_id]:
                 processed_data[session_id]['processed_df'] = df.copy()
                 # Store reference to original columns for export differentiation
@@ -1054,8 +1053,25 @@ async def process_range(
                         if actual_idx < len(processed_data[session_id]['processed_df']):
                             processed_data[session_id]['processed_df'].loc[actual_idx, col] = result_row[col]
             
-            # Save updated session to persistent storage after processing
-            storage.save_session(session_id, processed_data[session_id])
+            # Save to persistent storage based on performance mode
+            rows_processed = end_idx - start_idx
+            total_rows = len(processed_data[session_id]['original_df'])
+            is_completion = end_row >= total_rows
+            
+            if PERFORMANCE_MODE:
+                # Performance mode: only save at completion or large batches
+                if is_completion or rows_processed >= 1000:
+                    try:
+                        storage.save_session(session_id, processed_data[session_id])
+                        logging.info(f"Saved session {session_id} ({'completion' if is_completion else 'checkpoint'})")
+                    except Exception as e:
+                        logging.warning(f"Storage save failed (non-critical): {e}")
+            else:
+                # Safety mode: save after every batch
+                try:
+                    storage.save_session(session_id, processed_data[session_id])
+                except Exception as e:
+                    logging.warning(f"Storage save failed (non-critical): {e}")
         
         successful_results = [r for r in results if r['processing_status'] == 'success']
         
@@ -1088,8 +1104,11 @@ async def download_complete_results(session_id: str):
             if session_data:
                 processed_data[session_id] = session_data
         
-        if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
-            raise HTTPException(status_code=400, detail="No processed data found")
+        if session_id not in processed_data:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        if 'processed_df' not in processed_data[session_id]:
+            raise HTTPException(status_code=400, detail="No processed data found. Please process some data first using 'Process Batch' or 'Process All Rows'.")
         
         processed_df = processed_data[session_id]['processed_df']
         original_filename = processed_data[session_id]['filename']
@@ -1119,8 +1138,11 @@ async def download_processed_only(session_id: str):
             if session_data:
                 processed_data[session_id] = session_data
         
-        if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
-            raise HTTPException(status_code=400, detail="No processed data found")
+        if session_id not in processed_data:
+            raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+        
+        if 'processed_df' not in processed_data[session_id]:
+            raise HTTPException(status_code=400, detail="No processed data found. Please process some data first using 'Process Batch' or 'Process All Rows'.")
         
         processed_df = processed_data[session_id]['processed_df']
         original_filename = processed_data[session_id]['filename']
