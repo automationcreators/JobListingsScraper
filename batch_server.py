@@ -931,7 +931,8 @@ async def analyze_csv_file(file: UploadFile = File(...)):
         session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         processed_data[session_id] = {
             'original_df': df,
-            'filename': file.filename
+            'filename': file.filename,
+            'original_columns': list(df.columns)  # Store original column list
         }
         
         return {
@@ -983,9 +984,29 @@ async def process_range(
         
         # Store results for export (both test and full processing)
         results_df = pd.DataFrame(results)
-        output_columns = ['extracted_job_title', 'job_category', 'general_category', 'confidence', 'original_content', 'job_details', 'row_id']
-        if job_id_column:
-            output_columns.append('job_id')
+        
+        # Dynamically determine all available columns from the results
+        available_columns = list(results_df.columns)
+        
+        # Define the standard expected columns in preferred order
+        preferred_order = ['row_id', 'job_id', 'extracted_job_title', 'job_category', 'general_category', 
+                          'confidence', 'job_count', 'city', 'state', 'job_details', 'original_content', 
+                          'processing_status', 'extraction_method']
+        
+        # Build output_columns list: preferred order first, then any additional columns
+        output_columns = []
+        for col in preferred_order:
+            if col in available_columns:
+                output_columns.append(col)
+        
+        # Add any additional columns not in preferred order
+        for col in available_columns:
+            if col not in output_columns:
+                output_columns.append(col)
+        
+        # Remove job_id if not provided
+        if not job_id_column:
+            output_columns = [col for col in output_columns if col != 'job_id']
         
         # Always store data for export, but mark if it's test data
                 
@@ -996,6 +1017,8 @@ async def process_range(
             # Store/update processed data
             if 'processed_df' not in processed_data[session_id]:
                 processed_data[session_id]['processed_df'] = df.copy()
+                # Store reference to original columns for export differentiation
+                processed_data[session_id]['original_df'] = df.copy()
                 # Initialize new columns with empty strings
                 for col in output_columns:
                     if col not in processed_data[session_id]['processed_df'].columns:
@@ -1070,16 +1093,38 @@ async def download_processed_only(session_id: str):
         processed_df = processed_data[session_id]['processed_df']
         original_filename = processed_data[session_id]['filename']
         
-        # Extract only the processed columns
-        processed_columns = ['row_id', 'extracted_job_title', 'job_category', 'general_category', 
-                           'confidence', 'job_details', 'original_content']
+        # Dynamically extract all processed columns (non-original data columns)
+        all_columns = list(processed_df.columns)
+        original_columns = list(processed_data[session_id]['original_df'].columns) if 'original_df' in processed_data[session_id] else []
         
-        # Add job_id if it exists
-        if 'job_id' in processed_df.columns:
-            processed_columns.insert(1, 'job_id')
+        # Processed columns are those not in original data
+        processed_columns = [col for col in all_columns if col not in original_columns]
+        
+        # Ensure we have the key columns in preferred order
+        preferred_processed_order = ['row_id', 'job_id', 'extracted_job_title', 'job_category', 'general_category', 
+                                   'confidence', 'job_count', 'city', 'state', 'job_details', 'original_content']
+        
+        # Reorder processed columns: preferred first, then any extras
+        ordered_processed_columns = []
+        for col in preferred_processed_order:
+            if col in processed_columns:
+                ordered_processed_columns.append(col)
+        
+        # Add any additional processed columns
+        for col in processed_columns:
+            if col not in ordered_processed_columns:
+                ordered_processed_columns.append(col)
+        
+        processed_columns = ordered_processed_columns
+        
+        # Filter to only columns that exist in the dataframe
+        existing_processed_columns = [col for col in processed_columns if col in processed_df.columns]
+        
+        if not existing_processed_columns:
+            raise HTTPException(status_code=400, detail="No processed columns found in dataset")
         
         # Create dataframe with only processed columns
-        processed_only_df = processed_df[processed_columns].copy()
+        processed_only_df = processed_df[existing_processed_columns].copy()
         
         base_name = original_filename.replace('.csv', '')
         output_filename = f"{base_name}_processed_only_{session_id}.csv"
@@ -1109,8 +1154,48 @@ async def health_check():
             "Location-aware pattern matching (e.g. 'CITY, STATE JOB TITLE jobs')",
             "Full original content display with no truncation",
             "Batch history and rerun capability",
-            "Perfect accuracy for aircraft/aviation/parts/detailing jobs"
+            "Perfect accuracy for aircraft/aviation/parts/detailing jobs",
+            "Dynamic column export with job_count, city, state extraction"
         ]
+    }
+
+@app.get("/sessions")
+async def list_sessions():
+    """List all active sessions with their data status for recovery purposes"""
+    sessions = []
+    for session_id, data in processed_data.items():
+        session_info = {
+            'session_id': session_id,
+            'filename': data.get('filename', 'unknown'),
+            'has_original': 'original_df' in data,
+            'has_processed': 'processed_df' in data,
+            'original_rows': len(data['original_df']) if 'original_df' in data else 0,
+            'processed_columns': list(data['processed_df'].columns) if 'processed_df' in data else []
+        }
+        sessions.append(session_info)
+    
+    return {'sessions': sessions}
+
+@app.get("/session/{session_id}/columns")
+async def get_session_columns(session_id: str):
+    """Get detailed column information for a session"""
+    if session_id not in processed_data:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    data = processed_data[session_id]
+    original_columns = list(data['original_df'].columns) if 'original_df' in data else []
+    processed_columns = list(data['processed_df'].columns) if 'processed_df' in data else []
+    
+    # Identify which columns are processed vs original
+    new_columns = [col for col in processed_columns if col not in original_columns]
+    
+    return {
+        'session_id': session_id,
+        'filename': data.get('filename', 'unknown'),
+        'original_columns': original_columns,
+        'processed_columns': processed_columns,
+        'new_columns': new_columns,
+        'total_rows': len(data['processed_df']) if 'processed_df' in data else 0
     }
 
 if __name__ == "__main__":
