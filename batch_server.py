@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from core.advanced_classifier import AdvancedJobClassifier
 from utils.storage import storage
+from utils.template_manager import template_manager, JobClassificationTemplate
 
 # Configure logging
 import logging
@@ -1275,9 +1276,77 @@ async def get_session_columns(session_id: str):
         'total_rows': len(data['processed_df']) if 'processed_df' in data else 0
     }
 
+# Template Management Endpoints
+
+@app.get("/templates")
+async def list_templates():
+    """List all available processing templates"""
+    templates = template_manager.list_templates()
+    return {'templates': templates}
+
+@app.post("/templates/save")
+async def save_template(
+    name: str = Form(...),
+    description: str = Form(""),
+    template_type: str = Form("job_classification")
+):
+    """Save current job classification setup as a template"""
+    try:
+        if template_type == "job_classification":
+            config = JobClassificationTemplate.create_from_classifier(classifier)
+            success = template_manager.save_template(name, config, description)
+            
+            if success:
+                return {
+                    'success': True,
+                    'message': f'Template "{name}" saved successfully',
+                    'template_name': name
+                }
+            else:
+                raise HTTPException(status_code=500, detail="Failed to save template")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported template type")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error saving template: {str(e)}")
+
+@app.get("/templates/{template_name}")
+async def get_template(template_name: str):
+    """Get details of a specific template"""
+    template = template_manager.load_template(template_name)
+    if template:
+        return template
+    else:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+@app.delete("/templates/{template_name}")
+async def delete_template(template_name: str):
+    """Delete a template"""
+    success = template_manager.delete_template(template_name)
+    if success:
+        return {'success': True, 'message': f'Template "{template_name}" deleted'}
+    else:
+        raise HTTPException(status_code=404, detail="Template not found")
+
+@app.post("/templates/{template_name}/apply")
+async def apply_template(template_name: str, session_id: str = Form(...)):
+    """Apply a template to a session (future functionality)"""
+    template = template_manager.load_template(template_name)
+    if not template:
+        raise HTTPException(status_code=404, detail="Template not found")
+    
+    # For now, just return the template info
+    # In the future, this would configure the classifier for the session
+    return {
+        'message': f'Template "{template_name}" ready to apply',
+        'template': template['config'],
+        'session_id': session_id
+    }
+
 if __name__ == "__main__":
     import uvicorn
     print("🎯 Starting Batch Processing Job Classification System")
     print("   Features: Range specification, batch processing, full content display")
+    print("   Templates: Save and reuse processing configurations")
     print("   Access at: http://localhost:8000")
     uvicorn.run(app, host="0.0.0.0", port=8000)
