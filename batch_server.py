@@ -20,12 +20,26 @@ from typing import Dict, List, Any, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from core.advanced_classifier import AdvancedJobClassifier
+from utils.storage import storage
+
+# Configure logging
+import logging
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI(title="Batch Processing Job Classification System", version="3.0.0")
 
 # Initialize classifier
 classifier = AdvancedJobClassifier(use_ai=False)
 processed_data = {}
+
+# Load existing sessions on startup
+try:
+    existing_sessions = storage.list_sessions()
+    print(f"🔄 Found {len(existing_sessions)} existing sessions in storage")
+    for session_id, info in existing_sessions.items():
+        print(f"   - {session_id}: {info['filename']} (saved: {info['saved_at']})")
+except Exception as e:
+    print(f"⚠️ Warning: Could not load existing sessions: {e}")
 
 # Enhanced HTML template with batch processing controls
 HTML_TEMPLATE = '''<!DOCTYPE html>
@@ -935,6 +949,9 @@ async def analyze_csv_file(file: UploadFile = File(...)):
             'original_columns': list(df.columns)  # Store original column list
         }
         
+        # Save session to persistent storage
+        storage.save_session(session_id, processed_data[session_id])
+        
         return {
             "success": True,
             "columns": columns,
@@ -1036,6 +1053,9 @@ async def process_range(
                         actual_idx = start_idx + i
                         if actual_idx < len(processed_data[session_id]['processed_df']):
                             processed_data[session_id]['processed_df'].loc[actual_idx, col] = result_row[col]
+            
+            # Save updated session to persistent storage after processing
+            storage.save_session(session_id, processed_data[session_id])
         
         successful_results = [r for r in results if r['processing_status'] == 'success']
         
@@ -1062,6 +1082,12 @@ async def process_range(
 async def download_complete_results(session_id: str):
     """Download complete CSV with original data + appended processed columns"""
     try:
+        # Try memory first, then load from storage if needed
+        if session_id not in processed_data:
+            session_data = storage.load_session(session_id)
+            if session_data:
+                processed_data[session_id] = session_data
+        
         if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
             raise HTTPException(status_code=400, detail="No processed data found")
         
@@ -1087,6 +1113,12 @@ async def download_complete_results(session_id: str):
 async def download_processed_only(session_id: str):
     """Download only the processed data columns (no original data)"""
     try:
+        # Try memory first, then load from storage if needed
+        if session_id not in processed_data:
+            session_data = storage.load_session(session_id)
+            if session_data:
+                processed_data[session_id] = session_data
+        
         if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
             raise HTTPException(status_code=400, detail="No processed data found")
         
@@ -1161,8 +1193,10 @@ async def health_check():
 
 @app.get("/sessions")
 async def list_sessions():
-    """List all active sessions with their data status for recovery purposes"""
-    sessions = []
+    """List all sessions (in-memory + persistent) with their data status"""
+    all_sessions = []
+    
+    # Add in-memory sessions
     for session_id, data in processed_data.items():
         session_info = {
             'session_id': session_id,
@@ -1170,11 +1204,32 @@ async def list_sessions():
             'has_original': 'original_df' in data,
             'has_processed': 'processed_df' in data,
             'original_rows': len(data['original_df']) if 'original_df' in data else 0,
-            'processed_columns': list(data['processed_df'].columns) if 'processed_df' in data else []
+            'processed_columns': list(data['processed_df'].columns) if 'processed_df' in data else [],
+            'storage_type': 'memory',
+            'saved_at': 'current_session'
         }
-        sessions.append(session_info)
+        all_sessions.append(session_info)
     
-    return {'sessions': sessions}
+    # Add persistent sessions that aren't in memory
+    try:
+        persistent_sessions = storage.list_sessions()
+        for session_id, info in persistent_sessions.items():
+            if session_id not in processed_data:
+                session_info = {
+                    'session_id': session_id,
+                    'filename': info.get('filename', 'unknown'),
+                    'has_original': info.get('has_original', False),
+                    'has_processed': info.get('has_processed', False),
+                    'original_rows': 'unknown',
+                    'processed_columns': 'unknown',
+                    'storage_type': 'disk',
+                    'saved_at': info.get('saved_at', 'unknown')
+                }
+                all_sessions.append(session_info)
+    except Exception as e:
+        logging.error(f"Error loading persistent sessions: {e}")
+    
+    return {'sessions': all_sessions}
 
 @app.get("/session/{session_id}/columns")
 async def get_session_columns(session_id: str):
