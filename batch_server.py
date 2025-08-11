@@ -1031,27 +1031,27 @@ async def process_range(
         
         # Always store data for export, but mark if it's test data
         # Store/update processed data
-            if 'processed_df' not in processed_data[session_id]:
-                processed_data[session_id]['processed_df'] = df.copy()
-                # Store reference to original columns for export differentiation
-                processed_data[session_id]['original_df'] = df.copy()
-                # Initialize new columns with empty strings
-                for col in output_columns:
-                    if col not in processed_data[session_id]['processed_df'].columns:
-                        processed_data[session_id]['processed_df'][col] = ''
-            
-            # Update the processed dataframe with new results - simplified approach
+        if 'processed_df' not in processed_data[session_id]:
+            processed_data[session_id]['processed_df'] = df.copy()
+            # Store reference to original columns for export differentiation
+            processed_data[session_id]['original_df'] = df.copy()
+            # Initialize new columns with empty strings
             for col in output_columns:
-                if col in results_df.columns:
-                    # Add column if it doesn't exist
-                    if col not in processed_data[session_id]['processed_df'].columns:
-                        processed_data[session_id]['processed_df'][col] = ''
-                    
-                    # Update the specific rows
-                    for i, (_, result_row) in enumerate(results_df.iterrows()):
-                        actual_idx = start_idx + i
-                        if actual_idx < len(processed_data[session_id]['processed_df']):
-                            processed_data[session_id]['processed_df'].loc[actual_idx, col] = result_row[col]
+                if col not in processed_data[session_id]['processed_df'].columns:
+                    processed_data[session_id]['processed_df'][col] = ''
+        
+        # Update the processed dataframe with new results - simplified approach
+        for col in output_columns:
+            if col in results_df.columns:
+                # Add column if it doesn't exist
+                if col not in processed_data[session_id]['processed_df'].columns:
+                    processed_data[session_id]['processed_df'][col] = ''
+                
+                # Update the specific rows
+                for i, (_, result_row) in enumerate(results_df.iterrows()):
+                    actual_idx = start_idx + i
+                    if actual_idx < len(processed_data[session_id]['processed_df']):
+                        processed_data[session_id]['processed_df'].loc[actual_idx, col] = result_row[col]
             
             # Save to persistent storage based on performance mode
             rows_processed = end_idx - start_idx
