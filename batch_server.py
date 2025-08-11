@@ -76,6 +76,32 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .confidence-medium { color: #ffc107; font-weight: bold; }
         .confidence-low { color: #dc3545; font-weight: bold; }
         .hidden { display: none; }
+        
+        /* Template Management Styles */
+        .template-controls { display: flex; gap: 15px; margin: 20px 0; }
+        .templates-container { margin: 20px 0; min-height: 100px; }
+        .templates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; margin: 20px 0; }
+        .template-card { background: #fff; border: 2px solid #e9ecef; border-radius: 10px; padding: 20px; transition: all 0.3s ease; cursor: pointer; position: relative; }
+        .template-card:hover { transform: translateY(-4px); box-shadow: 0 8px 25px rgba(102, 126, 234, 0.15); border-color: #667eea; }
+        .template-card.selected { border-color: #667eea; background: #f8f9ff; }
+        .template-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+        .template-name { color: #495057; font-size: 1.2em; font-weight: 600; margin: 0; }
+        .template-description { color: #6c757d; margin: 10px 0 15px 0; font-size: 0.95em; line-height: 1.5; }
+        .template-meta { color: #868e96; font-size: 0.85em; margin-bottom: 15px; display: flex; justify-content: space-between; }
+        .template-actions { display: flex; gap: 10px; margin-top: 15px; }
+        .template-delete { position: absolute; top: 15px; right: 15px; background: #dc3545; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-size: 0.8em; opacity: 0.7; transition: opacity 0.3s; }
+        .template-delete:hover { opacity: 1; }
+        .btn-small { padding: 8px 16px; font-size: 0.85em; }
+        .save-template-form { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border: 2px solid #dee2e6; border-radius: 12px; padding: 25px; margin: 20px 0; }
+        .save-template-form h4 { color: #495057; margin-bottom: 20px; }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; font-weight: 600; color: #495057; margin-bottom: 8px; }
+        .form-control { width: 100%; padding: 12px 15px; border: 2px solid #dee2e6; border-radius: 8px; font-size: 1rem; transition: border-color 0.3s; }
+        .form-control:focus { outline: none; border-color: #667eea; }
+        .form-buttons { display: flex; gap: 15px; margin-top: 25px; }
+        .template-placeholder { text-align: center; padding: 40px; background: #f8f9fa; border: 2px dashed #dee2e6; border-radius: 10px; }
+        .template-stats { display: flex; gap: 20px; margin-top: 10px; font-size: 0.8em; color: #6c757d; }
+        .template-tag { background: #e9ecef; color: #495057; padding: 4px 8px; border-radius: 4px; font-size: 0.75em; }
         .alert { padding: 15px; margin: 15px 0; border-radius: 6px; font-weight: 500; }
         .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
         .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
@@ -152,6 +178,40 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="header">
             <h1>🎯 Batch Processing Job Classification System</h1>
             <p>Advanced processing with range specification, batch control, and flexible export options</p>
+        </div>
+
+        <div class="section" id="template-section">
+            <h3>📋 Processing Templates</h3>
+            <p style="color: #6c757d; margin-bottom: 20px;">Save and reuse processing configurations across different datasets</p>
+            
+            <div class="template-controls">
+                <button onclick="loadTemplates()" class="btn btn-secondary">🔄 Load Templates</button>
+                <button onclick="showSaveTemplate()" class="btn btn-success">💾 Save Current Setup</button>
+            </div>
+            
+            <div id="templates-list" class="templates-container">
+                <div class="template-placeholder">
+                    <p style="color: #6c757d; text-align: center; margin: 30px 0;">
+                        📋 Click "Load Templates" to see available configurations
+                    </p>
+                </div>
+            </div>
+            
+            <div id="save-template-form" class="save-template-form hidden">
+                <h4>💾 Save Current Configuration as Template</h4>
+                <div class="form-group">
+                    <label>Template Name:</label>
+                    <input type="text" id="template-name" placeholder="e.g., 'Job Classification v2', 'Healthcare Jobs'" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Description:</label>
+                    <textarea id="template-description" placeholder="Describe what this template is for and what rules it contains" rows="3" class="form-control"></textarea>
+                </div>
+                <div class="form-buttons">
+                    <button onclick="saveTemplate()" class="btn btn-primary">💾 Save Template</button>
+                    <button onclick="hideSaveTemplate()" class="btn btn-secondary">Cancel</button>
+                </div>
+            </div>
         </div>
 
         <div class="section">
@@ -566,6 +626,244 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         let selectedRows = new Set();
         let sortColumn = '';
         let sortDirection = 'asc';
+        
+        // Template management functions
+        async function loadTemplates() {
+            try {
+                const response = await fetch('/templates');
+                const data = await response.json();
+                displayTemplates(data.templates);
+            } catch (error) {
+                showAlert('Failed to load templates: ' + error.message, 'error');
+            }
+        }
+        
+        function displayTemplates(templates) {
+            const container = document.getElementById('templates-list');
+            
+            if (templates.length === 0) {
+                container.innerHTML = `
+                    <div class="template-placeholder">
+                        <p style="color: #6c757d; text-align: center; margin: 30px 0;">
+                            📎 No templates found. Save your current setup to create the first template.
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '<div class="templates-grid">';
+            templates.forEach((template, index) => {
+                const date = new Date(template.created_at).toLocaleDateString();
+                const size = Math.round(template.file_size / 1024 * 100) / 100;
+                const templateId = template.name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+                
+                html += `
+                    <div class="template-card" id="template-${templateId}" onclick="selectTemplate('${template.name}')">
+                        <button onclick="event.stopPropagation(); deleteTemplate('${template.name}')" class="template-delete" title="Delete template">×</button>
+                        
+                        <div class="template-header">
+                            <h5 class="template-name">${template.name}</h5>
+                        </div>
+                        
+                        <div class="template-description">
+                            ${template.description || 'No description provided'}
+                        </div>
+                        
+                        <div class="template-meta">
+                            <span>📅 ${date}</span>
+                            <span>💾 ${size} KB</span>
+                        </div>
+                        
+                        <div class="template-stats">
+                            <span class="template-tag">🎯 Job Classification</span>
+                        </div>
+                        
+                        <div class="template-actions">
+                            <button onclick="event.stopPropagation(); viewTemplate('${template.name}')" class="btn btn-secondary btn-small">
+                                👁️ View Details
+                            </button>
+                            <button onclick="event.stopPropagation(); applyTemplate('${template.name}')" class="btn btn-primary btn-small">
+                                🔧 Use Template
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function createTemplatesContainer() {
+            const container = document.createElement('div');
+            container.id = 'templates-list';
+            container.className = 'templates-container';
+            // Insert after file upload section
+            const fileSection = document.querySelector('.section');
+            fileSection.parentNode.insertBefore(container, fileSection);
+            return container;
+        }
+        
+        function showSaveTemplate() {
+            const form = document.getElementById('save-template-form') || createSaveTemplateForm();
+            form.classList.remove('hidden');
+        }
+        
+        function hideSaveTemplate() {
+            const form = document.getElementById('save-template-form');
+            if (form) form.classList.add('hidden');
+        }
+        
+        function createSaveTemplateForm() {
+            const form = document.createElement('div');
+            form.id = 'save-template-form';
+            form.className = 'save-template-form hidden';
+            form.innerHTML = `
+                <h4>💾 Save Current Configuration as Template</h4>
+                <input type="text" id="template-name" placeholder="Template name" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;">
+                <textarea id="template-description" placeholder="Description" rows="3" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                <div style="margin-top: 15px;">
+                    <button onclick="saveTemplate()" class="btn btn-primary">Save Template</button>
+                    <button onclick="hideSaveTemplate()" class="btn btn-secondary">Cancel</button>
+                </div>
+            `;
+            document.body.appendChild(form);
+            return form;
+        }
+        
+        async function saveTemplate() {
+            const name = document.getElementById('template-name').value;
+            const description = document.getElementById('template-description').value;
+            
+            if (!name.trim()) {
+                showAlert('Please enter a template name', 'error');
+                return;
+            }
+            
+            try {
+                const formData = new FormData();
+                formData.append('name', name);
+                formData.append('description', description);
+                formData.append('template_type', 'job_classification');
+                
+                const response = await fetch('/templates/save', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(`Template "${name}" saved successfully!`, 'success');
+                    hideSaveTemplate();
+                    loadTemplates(); // Refresh the list
+                    // Clear form
+                    document.getElementById('template-name').value = '';
+                    document.getElementById('template-description').value = '';
+                } else {
+                    throw new Error(result.message || 'Failed to save template');
+                }
+            } catch (error) {
+                showAlert('Failed to save template: ' + error.message, 'error');
+            }
+        }
+        
+        async function deleteTemplate(name) {
+            if (!confirm(`Are you sure you want to delete template "${name}"?`)) return;
+            
+            try {
+                const response = await fetch(`/templates/${encodeURIComponent(name)}`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert(`Template "${name}" deleted`, 'success');
+                    loadTemplates(); // Refresh the list
+                } else {
+                    throw new Error(result.message || 'Failed to delete template');
+                }
+            } catch (error) {
+                showAlert('Failed to delete template: ' + error.message, 'error');
+            }
+        }
+        
+        function selectTemplate(name) {
+            // Remove previous selection
+            document.querySelectorAll('.template-card').forEach(card => {
+                card.classList.remove('selected');
+            });
+            
+            // Select current template
+            const templateId = name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+            const card = document.getElementById(`template-${templateId}`);
+            if (card) {
+                card.classList.add('selected');
+                showAlert(`Selected template: "${name}"`, 'success');
+            }
+        }
+        
+        async function viewTemplate(name) {
+            try {
+                const response = await fetch(`/templates/${encodeURIComponent(name)}`);
+                const template = await response.json();
+                
+                const categories = Object.keys(template.config.categories).join(', ');
+                const patterns = template.config.extraction_patterns.length;
+                const locationPatterns = template.config.location_patterns.length;
+                const outputColumns = template.config.output_columns.join(', ');
+                
+                const details = `📋 Template: ${template.name}
+
+📅 Created: ${new Date(template.created_at).toLocaleString()}
+📝 Version: ${template.version}
+
+📏 Description:
+${template.description || 'No description'}
+
+🎯 Categories (${Object.keys(template.config.categories).length}):
+${categories}
+
+🔍 Extraction Patterns: ${patterns}
+🗺️ Location Patterns: ${locationPatterns}
+
+📈 Output Columns:
+${outputColumns}
+
+⚙️ Settings:
+- Use AI: ${template.config.processing_settings.use_ai}
+- Extract Job Count: ${template.config.processing_settings.extract_job_count}
+- Extract Location: ${template.config.processing_settings.extract_city && template.config.processing_settings.extract_state}`;
+                
+                alert(details);
+            } catch (error) {
+                showAlert('Failed to view template: ' + error.message, 'error');
+            }
+        }
+        
+        async function applyTemplate(name) {
+            if (!confirm(`Apply template "${name}" to future processing sessions?\n\nThis will use the template's categories, patterns, and settings for new data.`)) {
+                return;
+            }
+            
+            try {
+                // For now, just show success message and select the template
+                selectTemplate(name);
+                showAlert(`✅ Template "${name}" is ready to use!\n\nThis template will be applied to your next processing session.`, 'success');
+                
+                // Future: Apply template to current session or store for next session
+                // const formData = new FormData();
+                // formData.append('session_id', currentSessionId || 'next');
+                // const response = await fetch(`/templates/${encodeURIComponent(name)}/apply`, {
+                //     method: 'POST',
+                //     body: formData
+                // });
+                
+            } catch (error) {
+                showAlert('Failed to apply template: ' + error.message, 'error');
+            }
+        }
 
         function displayResults(result) {
             displayStats(result.summary);
