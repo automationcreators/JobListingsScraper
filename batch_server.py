@@ -66,6 +66,34 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         .stat-number { font-size: 1.5rem; font-weight: bold; color: #667eea; }
         .batch-history { background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 15px; margin: 15px 0; max-height: 200px; overflow-y: auto; }
         select { width: 100%; padding: 12px; border: 2px solid #dee2e6; border-radius: 6px; font-size: 1rem; }
+        
+        /* Enhanced Refinement Interface Styles */
+        .classification-refinement-panel { margin: 30px 0; }
+        .filter-controls { background: #f8f9fa; border: 2px solid #e9ecef; border-radius: 8px; padding: 20px; margin: 20px 0; }
+        .filter-row { display: grid; grid-template-columns: 1fr 1fr 2fr auto auto; gap: 15px; align-items: center; margin-top: 15px; }
+        .filter-control { padding: 8px 12px; border: 1px solid #dee2e6; border-radius: 4px; font-size: 0.9rem; }
+        .results-table-container { max-height: 600px; overflow-y: auto; border: 1px solid #dee2e6; border-radius: 6px; }
+        .sortable-results-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .sortable-results-table th { background: #667eea; color: white; padding: 12px 8px; cursor: pointer; position: sticky; top: 0; z-index: 10; }
+        .sortable-results-table th:hover { background: #5a67d8; }
+        .sortable-results-table td { padding: 8px; border-bottom: 1px solid #e9ecef; }
+        .sortable-results-table tr:hover { background: #f8f9ff; }
+        .sortable-results-table tr.selected { background: #e3f2fd; }
+        .row-checkbox { margin-right: 8px; }
+        .confidence-indicator { padding: 2px 6px; border-radius: 3px; color: white; font-size: 0.75em; font-weight: bold; }
+        .confidence-high { background: #28a745; }
+        .confidence-medium { background: #ffc107; color: #212529; }
+        .confidence-low { background: #dc3545; }
+        .confidence-failed { background: #6c757d; }
+        .original-text-preview { max-width: 200px; font-size: 0.8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .filtered-count { font-size: 0.9em; color: #6c757d; font-weight: 500; }
+        .bulk-actions { background: #fff3cd; border: 1px solid #ffeaa7; border-radius: 6px; padding: 15px; margin: 10px 0; }
+        .bulk-actions.hidden { display: none; }
+        .action-btn { padding: 8px 16px; margin: 0 5px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
+        .action-btn.primary { background: #667eea; color: white; }
+        .action-btn.success { background: #28a745; color: white; }
+        .action-btn.warning { background: #ffc107; color: #212529; }
+        .action-btn.danger { background: #dc3545; color: white; }
     </style>
 </head>
 <body>
@@ -383,40 +411,95 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             document.getElementById('end-row').value = batch.end_row;
         }
 
+        // Global variables for enhanced interface
+        let globalResultsData = [];
+        let filteredData = [];
+        let selectedRows = new Set();
+        let sortColumn = '';
+        let sortDirection = 'asc';
+
         function displayResults(result) {
             displayStats(result.summary);
             
-            const container = document.getElementById('results-content');
-            const data = result.results;
+            globalResultsData = result.results || [];
+            filteredData = [...globalResultsData];
+            selectedRows.clear();
             
-            if (!data || data.length === 0) {
+            const container = document.getElementById('results-content');
+            
+            if (!globalResultsData || globalResultsData.length === 0) {
                 container.innerHTML = '<p>No results to display</p>';
                 return;
             }
 
-            let html = '<h4>Advanced Classification Results:</h4><table class="results-table"><thead><tr>';
-            html += '<th>Row</th><th>Job Title</th><th>Category</th><th>General</th><th>Conf</th><th>Job Details</th><th>Original Content</th>';
-            if (data[0].job_id !== undefined) html += '<th>Job ID</th>';
-            html += '</tr></thead><tbody>';
+            // Build enhanced interface
+            let html = `
+                <div class="classification-refinement-panel">
+                    <h4>🔍 Interactive Classification Results</h4>
+                    
+                    <!-- Filter Controls -->
+                    <div class="filter-controls">
+                        <h5>Filter & Search Results</h5>
+                        <div class="filter-row">
+                            <select id="confidence-filter" class="filter-control" onchange="applyFilters()">
+                                <option value="all">All Confidence Levels</option>
+                                <option value="high">High (&gt;70%)</option>
+                                <option value="medium">Medium (40-70%)</option>
+                                <option value="low">Low (&lt;40%)</option>
+                                <option value="failed">Failed Extractions</option>
+                            </select>
+                            
+                            <select id="category-filter" class="filter-control" onchange="applyFilters()">
+                                <option value="all">All Categories</option>
+                                <option value="Unable to Classify">Unable to Classify</option>
+                                <option value="Aviation Mechanic">Aviation Mechanic</option>
+                                <option value="HVAC Technician">HVAC Technician</option>
+                                <option value="Security Guard">Security Guard</option>
+                                <option value="Address">Address</option>
+                            </select>
+                            
+                            <input type="text" id="keyword-search" class="filter-control" placeholder="Search original text..." onkeyup="applyFilters()">
+                            
+                            <button onclick="applyFilters()" class="action-btn primary">Apply Filters</button>
+                            <span id="filtered-count" class="filtered-count">0 rows shown</span>
+                        </div>
+                    </div>
+
+                    <!-- Bulk Actions (hidden by default) -->
+                    <div id="bulk-actions" class="bulk-actions hidden">
+                        <strong>Selected <span id="selection-count">0</span> rows:</strong>
+                        <button onclick="markAsCorrect()" class="action-btn success">✅ Mark as Correct</button>
+                        <button onclick="exportSelected()" class="action-btn primary">📤 Export Selected</button>
+                        <button onclick="createRuleFromSelected()" class="action-btn warning">🔧 Create Rule</button>
+                        <button onclick="clearSelection()" class="action-btn">Clear Selection</button>
+                    </div>
+                    
+                    <!-- Enhanced Results Table -->
+                    <div class="results-table-container">
+                        <table class="sortable-results-table">
+                            <thead>
+                                <tr>
+                                    <th><input type="checkbox" id="select-all" onchange="toggleSelectAll()"></th>
+                                    <th onclick="sortBy('confidence')">Confidence ↕️</th>
+                                    <th onclick="sortBy('category')">Category ↕️</th>
+                                    <th onclick="sortBy('job_title')">Job Title ↕️</th>
+                                    <th onclick="sortBy('job_count')">Count ↕️</th>
+                                    <th onclick="sortBy('city')">City ↕️</th>
+                                    <th onclick="sortBy('state')">State ↕️</th>
+                                    <th>Original Text</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="results-tbody">
+                                <!-- Filtered results populated here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
             
-            data.forEach((row, index) => {
-                const confidenceClass = row.confidence > 0.7 ? 'confidence-high' : 
-                                      row.confidence > 0.4 ? 'confidence-medium' : 'confidence-low';
-                
-                html += '<tr>';
-                html += `<td>${row.row_id || index}</td>`;
-                html += `<td><strong>${row.extracted_job_title || 'N/A'}</strong></td>`;
-                html += `<td>${row.job_category || 'N/A'}</td>`;
-                html += `<td><span style="background: ${row.general_category === 'exact' ? '#28a745' : row.general_category === 'general' ? '#ffc107' : '#6c757d'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">${row.general_category || 'other'}</span></td>`;
-                html += `<td class="${confidenceClass}">${((row.confidence || 0) * 100).toFixed(0)}%</td>`;
-                html += `<td class="original-content" style="max-width: 250px; font-size: 0.8em;">${row.job_details || 'N/A'}</td>`;
-                html += `<td class="original-content">${row.original_content || ''}</td>`;
-                if (row.job_id !== undefined) html += `<td>${row.job_id || 'N/A'}</td>`;
-                html += '</tr>';
-            });
-            
-            html += '</tbody></table>';
             container.innerHTML = html;
+            populateResultsTable();
         }
 
         function displayStats(summary) {
@@ -430,6 +513,208 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             html += `<div class="stat-card"><div class="stat-number">${summary.range || 'N/A'}</div><div class="stat-label">Row Range</div></div>`;
             html += '</div>';
             container.innerHTML = html;
+        }
+
+        // Enhanced interface functions
+        function populateResultsTable() {
+            const tbody = document.getElementById('results-tbody');
+            if (!tbody) return;
+            
+            let html = '';
+            filteredData.forEach((row, index) => {
+                const isSelected = selectedRows.has(row.row_id || index);
+                const confidence = (row.confidence || 0) * 100;
+                const confidenceClass = confidence > 70 ? 'confidence-high' : 
+                                       confidence > 40 ? 'confidence-medium' : 
+                                       confidence > 0 ? 'confidence-low' : 'confidence-failed';
+                
+                html += `
+                    <tr class="${isSelected ? 'selected' : ''}" data-row-id="${row.row_id || index}">
+                        <td><input type="checkbox" class="row-checkbox" ${isSelected ? 'checked' : ''} onchange="toggleRowSelection('${row.row_id || index}')"></td>
+                        <td><span class="confidence-indicator ${confidenceClass}">${confidence.toFixed(0)}%</span></td>
+                        <td>${row.job_category || 'N/A'}</td>
+                        <td><strong>${row.extracted_job_title || 'N/A'}</strong></td>
+                        <td style="text-align: center;">${row.job_count || '-'}</td>
+                        <td>${row.city || '-'}</td>
+                        <td><strong>${row.state || '-'}</strong></td>
+                        <td class="original-text-preview" title="${(row.original_content || '').replace(/"/g, '&quot;')}">${(row.original_content || '').substring(0, 100)}${(row.original_content || '').length > 100 ? '...' : ''}</td>
+                        <td>
+                            <button onclick="editRow('${row.row_id || index}')" class="action-btn primary" style="font-size: 0.7rem; padding: 4px 8px;">✏️ Edit</button>
+                        </td>
+                    </tr>
+                `;
+            });
+            
+            tbody.innerHTML = html;
+            updateFilteredCount();
+        }
+
+        function applyFilters() {
+            const confidenceFilter = document.getElementById('confidence-filter').value;
+            const categoryFilter = document.getElementById('category-filter').value;
+            const keywordSearch = document.getElementById('keyword-search').value.toLowerCase();
+            
+            filteredData = globalResultsData.filter(row => {
+                // Confidence filter
+                const confidence = (row.confidence || 0) * 100;
+                if (confidenceFilter === 'high' && confidence <= 70) return false;
+                if (confidenceFilter === 'medium' && (confidence <= 40 || confidence > 70)) return false;
+                if (confidenceFilter === 'low' && (confidence <= 0 || confidence > 40)) return false;
+                if (confidenceFilter === 'failed' && confidence > 0) return false;
+                
+                // Category filter
+                if (categoryFilter !== 'all' && (row.job_category || '') !== categoryFilter) return false;
+                
+                // Keyword search
+                if (keywordSearch && !(row.original_content || '').toLowerCase().includes(keywordSearch)) return false;
+                
+                return true;
+            });
+            
+            populateResultsTable();
+        }
+
+        function sortBy(column) {
+            if (sortColumn === column) {
+                sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'asc';
+            }
+            
+            filteredData.sort((a, b) => {
+                let aVal, bVal;
+                
+                switch(column) {
+                    case 'confidence':
+                        aVal = a.confidence || 0;
+                        bVal = b.confidence || 0;
+                        break;
+                    case 'category':
+                        aVal = a.job_category || '';
+                        bVal = b.job_category || '';
+                        break;
+                    case 'job_title':
+                        aVal = a.extracted_job_title || '';
+                        bVal = b.extracted_job_title || '';
+                        break;
+                    case 'job_count':
+                        aVal = parseInt(a.job_count) || 0;
+                        bVal = parseInt(b.job_count) || 0;
+                        break;
+                    case 'city':
+                        aVal = a.city || '';
+                        bVal = b.city || '';
+                        break;
+                    case 'state':
+                        aVal = a.state || '';
+                        bVal = b.state || '';
+                        break;
+                    default:
+                        return 0;
+                }
+                
+                if (aVal < bVal) return sortDirection === 'asc' ? -1 : 1;
+                if (aVal > bVal) return sortDirection === 'asc' ? 1 : -1;
+                return 0;
+            });
+            
+            populateResultsTable();
+        }
+
+        function toggleSelectAll() {
+            const selectAll = document.getElementById('select-all');
+            const checkboxes = document.querySelectorAll('.row-checkbox');
+            
+            selectedRows.clear();
+            
+            if (selectAll.checked) {
+                filteredData.forEach((row, index) => {
+                    selectedRows.add(row.row_id || index);
+                });
+                checkboxes.forEach(cb => cb.checked = true);
+            } else {
+                checkboxes.forEach(cb => cb.checked = false);
+            }
+            
+            updateSelectionUI();
+        }
+
+        function toggleRowSelection(rowId) {
+            if (selectedRows.has(rowId)) {
+                selectedRows.delete(rowId);
+            } else {
+                selectedRows.add(rowId);
+            }
+            
+            updateSelectionUI();
+        }
+
+        function updateSelectionUI() {
+            const bulkActions = document.getElementById('bulk-actions');
+            const selectionCount = document.getElementById('selection-count');
+            const selectAll = document.getElementById('select-all');
+            
+            if (selectedRows.size > 0) {
+                bulkActions.classList.remove('hidden');
+                selectionCount.textContent = selectedRows.size;
+            } else {
+                bulkActions.classList.add('hidden');
+            }
+            
+            // Update select-all checkbox state
+            const totalVisible = filteredData.length;
+            if (selectedRows.size === totalVisible && totalVisible > 0) {
+                selectAll.checked = true;
+                selectAll.indeterminate = false;
+            } else if (selectedRows.size > 0) {
+                selectAll.checked = false;
+                selectAll.indeterminate = true;
+            } else {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            }
+            
+            // Update row highlighting
+            document.querySelectorAll('tbody tr').forEach(row => {
+                const rowId = row.dataset.rowId;
+                if (selectedRows.has(rowId)) {
+                    row.classList.add('selected');
+                } else {
+                    row.classList.remove('selected');
+                }
+            });
+        }
+
+        function updateFilteredCount() {
+            const filteredCountElement = document.getElementById('filtered-count');
+            if (filteredCountElement) {
+                filteredCountElement.textContent = `${filteredData.length} of ${globalResultsData.length} rows shown`;
+            }
+        }
+
+        function clearSelection() {
+            selectedRows.clear();
+            document.querySelectorAll('.row-checkbox').forEach(cb => cb.checked = false);
+            document.getElementById('select-all').checked = false;
+            updateSelectionUI();
+        }
+
+        // Placeholder functions for future implementation
+        function markAsCorrect() {
+            alert(`Marking ${selectedRows.size} rows as correct - Feature coming soon!`);
+        }
+
+        function exportSelected() {
+            alert(`Exporting ${selectedRows.size} selected rows - Feature coming soon!`);
+        }
+
+        function createRuleFromSelected() {
+            alert(`Creating rule from ${selectedRows.size} selected rows - Feature coming soon!`);
+        }
+
+        function editRow(rowId) {
+            alert(`Editing row ${rowId} - Feature coming soon!`);
         }
 
         async function downloadCompleteResults() {

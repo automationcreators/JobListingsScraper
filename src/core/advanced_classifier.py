@@ -102,12 +102,18 @@ class AdvancedJobClassifier:
         sentences = text.split('.')
         first_sentence = sentences[0].strip() if sentences else text
         
-        # PRIORITY 1: Extract from first sentence - typically "NUMBER JOB TITLE jobs"
+        # PRIORITY 1: Check for new structure with job quantity later and specific job title FIRST
+        # This pattern: "general jobs in location. NUMBER+ jobs. Specific Job Title."
+        later_job_title = self._extract_from_quantity_later_structure(text)
+        if later_job_title and later_job_title != "Unable to extract job title":
+            return later_job_title
+        
+        # PRIORITY 2: Extract from first sentence - typically "NUMBER JOB TITLE jobs"
         first_sentence_title = self._extract_from_first_sentence(first_sentence)
         if first_sentence_title and first_sentence_title != "Unable to extract job title":
             return first_sentence_title
         
-        # PRIORITY 2: Check if this is a "Apply to..." format where we should ignore the list
+        # PRIORITY 3: Check if this is a "Apply to..." format where we should ignore the list
         apply_to_section = self._extract_apply_to_section(text)
         if apply_to_section and len(apply_to_section) >= 2:  # Has job list
             # If there's a job list, use the first sentence job title or fallback to generic
@@ -129,8 +135,9 @@ class AdvancedJobClassifier:
         
         sentence = sentence.strip()
         
-        # Pattern 1: "NUMBER LOCATION JOB TITLE jobs" - prioritize this format
+        # Enhanced patterns for different job posting structures
         patterns = [
+            # PRIORITY 1: Number-starting patterns (existing)
             # "76 CHANDLER, AZ AIRCRAFT PARTS jobs" -> "Aircraft Parts" - specific location pattern
             r'^\d+\s+[A-Z\s,]+?,\s*[A-Z]{2}\s+([A-Z][A-Za-z\s&]+?)\s+jobs?',
             
@@ -142,6 +149,13 @@ class AdvancedJobClassifier:
             
             # "NUMBER JOB TITLE jobs" (simple case without location)
             r'^\d+\s+([A-Z][A-Za-z\s&]+?)\s+jobs?(?:\s+from|\s*$)',
+            
+            # PRIORITY 2: Non-number starting patterns with job titles first
+            # "Aviation Safety Inspector jobs in Georgia" -> "Aviation Safety Inspector"
+            r'^([A-Z][A-Za-z\s&]+?)\s+jobs?\s+in\s+[A-Za-z\s,]+',
+            
+            # "Air Conditioning Technician jobs in location" -> "Air Conditioning Technician"  
+            r'^([A-Z][A-Za-z\s&]+?)\s+jobs?\s+in\s+',
         ]
         
         for pattern in patterns:
@@ -150,6 +164,62 @@ class AdvancedJobClassifier:
                 title = match.group(1).strip()
                 cleaned_title = self._clean_job_title(title)
                 if cleaned_title and len(cleaned_title.split()) >= 1:  # Allow single words from first sentence
+                    return cleaned_title
+        
+        return "Unable to extract job title"
+    
+    def _extract_from_quantity_later_structure(self, text: str) -> str:
+        """Extract job title from structure where quantity appears later: 'job type jobs in location. ##+ jobs. Specific Job Title.'"""
+        if not text:
+            return "Unable to extract job title"
+        
+        # Look for pattern: "general jobs in location. NUMBER+ jobs. Specific Job Title."
+        # Example: "apprenticeship jobs in el mirage, az. 50+ jobs. Air Conditioning Technician & Apprentices."
+        
+        # Split by periods to get sentences
+        sentences = text.split('.')
+        if len(sentences) < 3:
+            return "Unable to extract job title"
+        
+        first_sentence = sentences[0].strip()
+        second_sentence = sentences[1].strip()
+        third_sentence = sentences[2].strip()
+        
+        # Check if this matches the pattern
+        # First sentence: "general jobs in location"
+        # Second sentence: "NUMBER+ jobs"  
+        # Third sentence: "Specific Job Title"
+        
+        # First pattern should match GENERIC job types, not specific job titles
+        first_pattern = r'^(?:apprenticeship|training|general|entry.level|part.time|full.time|temporary|contract|internship|student|graduate|junior|senior|experienced|new|open|available|heating|cooling|plumbing|electrical|construction|maintenance|repair|installation)\s+jobs?\s+in\s+[A-Za-z\s,]+'
+        second_pattern = r'^\d+\+?\s+jobs?'
+        third_pattern = r'^([^\.]+)'  # Everything until period or end of string
+        
+        if (re.match(first_pattern, first_sentence, re.IGNORECASE) and 
+            re.match(second_pattern, second_sentence, re.IGNORECASE) and
+            len(third_sentence) > 0):
+            
+            # Extract job title from third sentence
+            match = re.match(third_pattern, third_sentence)
+            if match:
+                title = match.group(1).strip()
+                cleaned_title = self._clean_job_title(title)
+                if cleaned_title and len(cleaned_title) > 2:
+                    return cleaned_title
+        
+        # Alternative pattern: "Specific Job Title jobs in location. NUMBER+ jobs. [Other info]"
+        # Example: "Aviation Safety Inspector jobs in Georgia. 100+ jobs. Aircraft Interior Installer."
+        # For this pattern, we want the job title from the FIRST sentence, not the third
+        alt_first_pattern = r'^([A-Z][A-Za-z\s&]+?)\s+jobs?\s+in\s+[A-Za-z\s,]+'
+        
+        if (len(sentences) >= 2 and 
+            re.match(alt_first_pattern, first_sentence, re.IGNORECASE) and 
+            re.match(second_pattern, second_sentence, re.IGNORECASE)):
+            match = re.match(alt_first_pattern, first_sentence, re.IGNORECASE)
+            if match:
+                title = match.group(1).strip()
+                cleaned_title = self._clean_job_title(title)
+                if cleaned_title and len(cleaned_title) > 2:
                     return cleaned_title
         
         return "Unable to extract job title"
@@ -249,12 +319,14 @@ class AdvancedJobClassifier:
         
         result = ' '.join(cleaned_words).strip()
         
-        # Capitalize properly but keep & as is
+        # Capitalize properly but keep & as is and preserve HVAC
         words = result.split()
         capitalized_words = []
         for word in words:
             if word == '&':
                 capitalized_words.append('&')
+            elif word.lower() == 'hvac':
+                capitalized_words.append('HVAC')
             else:
                 capitalized_words.append(word.capitalize())
         
@@ -340,7 +412,7 @@ class AdvancedJobClassifier:
             return 'Electrician'
         
         # 4. Any technician/maintenance/repair with specific trades -> exact match
-        if 'hvac' in job_title_lower:
+        if 'hvac' in job_title_lower or 'air conditioning' in job_title_lower:
             return 'HVAC Technician'
         elif any(term in job_title_lower for term in ['plumbing', 'plumber', 'pipe']):
             return 'Plumber'
@@ -403,14 +475,14 @@ class AdvancedJobClassifier:
             
         # Check for exact matches with original 11 categories first
         exact_category_matches = {
-            'hvac': ['hvac technician', 'hvac', 'hvac mechanic', 'hvac maintenance technician'],
+            'hvac': ['hvac technician', 'hvac', 'hvac mechanic', 'hvac maintenance technician', 'air conditioning technician'],
             'security': ['security guard', 'security'],
             'nurse': ['registered nurse', 'licensed practical nurse'],
             'veterinary assistant': ['veterinary assistant'],
             'dental assistant': ['dental assistant'],
             'cdl': ['cdl driver'],  # Only CDL drivers are exact
             'speech pathology': ['speech pathologist'],
-            'aviation mechanic': ['aviation mechanic', 'aircraft mechanic', 'aircraft maintenance technician', 'aviation maintenance technician', 'aircraft parts', 'aircraft detailing'],
+            'aviation mechanic': ['aviation mechanic', 'aircraft mechanic', 'aircraft maintenance technician', 'aviation maintenance technician', 'aircraft parts', 'aircraft detailing', 'aviation safety inspector'],
             'plumber': ['plumber', 'plumbing technician', 'plumbing maintenance technician'],
             'electrician': ['electrician', 'electrical technician', 'electronics installation & repair technician', 'electronics installation and repair technician'],
             'welder': ['welder', 'welding technician']
@@ -542,6 +614,275 @@ class AdvancedJobClassifier:
         
         return False
 
+    def extract_job_count(self, text: str) -> str:
+        """Extract the total number of job listings from text."""
+        if not text or pd.isna(text):
+            return ""
+        
+        text = str(text).strip()
+        
+        # Check if this is an address first
+        if self.is_address(text):
+            return ""
+        
+        # Pattern 1: Numbers with + (like "50+ jobs", "100+ jobs")
+        plus_pattern = r'(\d+)\+\s+jobs?'
+        plus_match = re.search(plus_pattern, text, re.IGNORECASE)
+        if plus_match:
+            return plus_match.group(1)
+        
+        # Pattern 2: First number in text if not an address and reasonable job count
+        first_number_pattern = r'^(\d+)\s+'
+        first_match = re.match(first_number_pattern, text)
+        if first_match:
+            number = int(first_match.group(1))
+            # Reasonable job count range (1-10000)
+            if 1 <= number <= 10000:
+                return str(number)
+        
+        # Pattern 3: Numbers followed by job-related words
+        job_count_pattern = r'(\d+)\s+(?:job|position|opening|vacancy|role)s?\s+(?:available|posted|found|listed|in\s+)'
+        job_match = re.search(job_count_pattern, text, re.IGNORECASE)
+        if job_match:
+            return job_match.group(1)
+        
+        return ""
+
+    def extract_city(self, text: str) -> str:
+        """Extract city name from location patterns in text."""
+        if not text or pd.isna(text):
+            return ""
+        
+        text = str(text).strip()
+        
+        # Check if this is an address first
+        if self.is_address(text):
+            return ""
+        
+        # Pattern 1: "jobs available in CITY, STATE" or "jobs in CITY, STATE"
+        available_pattern = r'jobs?\s+(?:available\s+)?in\s+([A-Za-z\s]{2,30}),\s*([A-Za-z]+)(?:\s+on|\s+at|\s|$)'
+        available_match = re.search(available_pattern, text, re.IGNORECASE)
+        if available_match:
+            city = available_match.group(1).strip()
+            # Clean up city name (remove extra spaces, capitalize properly)
+            return self._clean_city_name(city)
+        
+        # Pattern 2: After number at start, look for city pattern "NUMBER CITY, STATE DESCRIPTION"
+        # Examples: "47 BUCKEYE, AZ AIRCRAFT", "76 CHANDLER, AZ AIRCRAFT PARTS", "33 FLAGSTAFF, AZ AIRCRAFT"
+        number_city_pattern = r'^\d+\s+([A-Z][A-Za-z\s]{1,25}),\s*([A-Z]{2})\s+'
+        number_match = re.match(number_city_pattern, text)
+        if number_match:
+            city = number_match.group(1).strip()
+            state = number_match.group(2).strip()
+            # Validate that the state is actually a valid US state
+            if self._is_valid_state(state):
+                return self._clean_city_name(city)
+        
+        # Pattern 3: General city, state pattern "CITY, STATE" 
+        general_pattern = r'\b([A-Za-z\s]{2,30}),\s*([A-Za-z\s]{2,20})\b'
+        general_matches = re.findall(general_pattern, text, re.IGNORECASE)
+        
+        if general_matches:
+            # Take the first match that looks like a real city (not all caps, reasonable length)
+            for city, state in general_matches:
+                city = city.strip()
+                state = state.strip()
+                if (len(city.split()) <= 3 and  # City is 1-3 words
+                    not city.isupper() and  # Not all caps (avoids company names)
+                    len(city) >= 2 and  # At least 2 characters
+                    self._is_valid_state(state)):  # Valid state
+                    return self._clean_city_name(city)
+        
+        # Pattern 4: "services in CITY, STATE" or similar non-job patterns
+        # Example: "services in Port St. Lucie, FL"
+        services_pattern = r'\b(?:services?|work|business)\s+in\s+([A-Za-z\s\.]{2,30}),\s*([A-Z]{2})\b'
+        services_match = re.search(services_pattern, text, re.IGNORECASE)
+        if services_match:
+            city = services_match.group(1).strip()
+            state = services_match.group(2).strip()
+            if self._is_valid_state(state):
+                return self._clean_city_name(city)
+
+        # Pattern 5: Single location that might be a state (handle as no city)
+        single_location_pattern = r'jobs?\s+(?:available\s+)?in\s+([A-Za-z\s]{2,20})\b'
+        single_match = re.search(single_location_pattern, text, re.IGNORECASE)
+        if single_match:
+            location = single_match.group(1).strip()
+            # If it's a valid state, don't return it as city
+            if self._is_valid_state(location):
+                return ""
+            # Otherwise, it might be a city without state
+            return self._clean_city_name(location)
+        
+        return ""
+
+    def extract_state(self, text: str) -> str:
+        """Extract state name or abbreviation from location patterns in text."""
+        if not text or pd.isna(text):
+            return ""
+        
+        text = str(text).strip()
+        
+        # Check if this is an address first
+        if self.is_address(text):
+            return ""
+        
+        # Pattern 1: "jobs available in CITY, STATE" or "jobs in CITY, STATE"
+        available_pattern = r'jobs?\s+(?:available\s+)?in\s+([A-Za-z\s]{2,30}),\s*([A-Za-z]+)(?:\s+on|\s+at|\s|$)'
+        available_match = re.search(available_pattern, text, re.IGNORECASE)
+        if available_match:
+            state = available_match.group(2).strip()
+            return self._normalize_state(state)
+        
+        # Pattern 2: After number at start, look for state pattern "NUMBER CITY, STATE DESCRIPTION"
+        # Examples: "47 BUCKEYE, AZ AIRCRAFT", "76 CHANDLER, AZ AIRCRAFT PARTS", "33 FLAGSTAFF, AZ AIRCRAFT"
+        number_city_pattern = r'^\d+\s+([A-Z][A-Za-z\s]{1,25}),\s*([A-Z]{2})\s+'
+        number_match = re.match(number_city_pattern, text)
+        if number_match:
+            state = number_match.group(2).strip()
+            # Validate that the state is actually a valid US state
+            if self._is_valid_state(state):
+                return self._normalize_state(state)
+        
+        # Pattern 3: General city, state pattern "CITY, STATE" 
+        general_pattern = r'\b([A-Za-z\s]{2,30}),\s*([A-Za-z\s]{2,20})\b'
+        general_matches = re.findall(general_pattern, text, re.IGNORECASE)
+        
+        if general_matches:
+            # Take the first match with a valid state
+            for city, state in general_matches:
+                state = state.strip()
+                if self._is_valid_state(state):
+                    return self._normalize_state(state)
+        
+        # Pattern 4: "services in CITY, STATE" or similar non-job patterns
+        # Example: "services in Port St. Lucie, FL"
+        services_pattern = r'\b(?:services?|work|business)\s+in\s+([A-Za-z\s\.]{2,30}),\s*([A-Z]{2})\b'
+        services_match = re.search(services_pattern, text, re.IGNORECASE)
+        if services_match:
+            state = services_match.group(2).strip()
+            if self._is_valid_state(state):
+                return self._normalize_state(state)
+
+        # Pattern 5: Single location that is a state
+        single_location_pattern = r'jobs?\s+(?:available\s+)?in\s+([A-Za-z\s]{2,20})\b'
+        single_match = re.search(single_location_pattern, text, re.IGNORECASE)
+        if single_match:
+            location = single_match.group(1).strip()
+            # If it's a valid state, return it normalized
+            if self._is_valid_state(location):
+                return self._normalize_state(location)
+        
+        return ""
+
+    def _clean_city_name(self, city: str) -> str:
+        """Clean and normalize city name."""
+        if not city:
+            return ""
+        
+        # Remove extra whitespace and capitalize properly
+        words = city.strip().split()
+        cleaned_words = []
+        
+        for word in words:
+            # Skip empty words
+            if not word:
+                continue
+                
+            # Capitalize each word properly
+            cleaned_words.append(word.capitalize())
+        
+        return ' '.join(cleaned_words)
+
+    def _normalize_state(self, state: str) -> str:
+        """Normalize state name to standard abbreviation."""
+        if not state:
+            return ""
+        
+        state = state.strip().upper()
+        
+        # State abbreviations mapping
+        state_mapping = {
+            'AL': 'AL', 'ALABAMA': 'AL',
+            'AK': 'AK', 'ALASKA': 'AK', 
+            'AZ': 'AZ', 'ARIZONA': 'AZ',
+            'AR': 'AR', 'ARKANSAS': 'AR',
+            'CA': 'CA', 'CALIFORNIA': 'CA',
+            'CO': 'CO', 'COLORADO': 'CO',
+            'CT': 'CT', 'CONNECTICUT': 'CT',
+            'DE': 'DE', 'DELAWARE': 'DE',
+            'FL': 'FL', 'FLORIDA': 'FL',
+            'GA': 'GA', 'GEORGIA': 'GA',
+            'HI': 'HI', 'HAWAII': 'HI',
+            'ID': 'ID', 'IDAHO': 'ID',
+            'IL': 'IL', 'ILLINOIS': 'IL',
+            'IN': 'IN', 'INDIANA': 'IN',
+            'IA': 'IA', 'IOWA': 'IA',
+            'KS': 'KS', 'KANSAS': 'KS',
+            'KY': 'KY', 'KENTUCKY': 'KY',
+            'LA': 'LA', 'LOUISIANA': 'LA',
+            'ME': 'ME', 'MAINE': 'ME',
+            'MD': 'MD', 'MARYLAND': 'MD',
+            'MA': 'MA', 'MASSACHUSETTS': 'MA',
+            'MI': 'MI', 'MICHIGAN': 'MI',
+            'MN': 'MN', 'MINNESOTA': 'MN',
+            'MS': 'MS', 'MISSISSIPPI': 'MS',
+            'MO': 'MO', 'MISSOURI': 'MO',
+            'MT': 'MT', 'MONTANA': 'MT',
+            'NE': 'NE', 'NEBRASKA': 'NE',
+            'NV': 'NV', 'NEVADA': 'NV',
+            'NH': 'NH', 'NEW HAMPSHIRE': 'NH',
+            'NJ': 'NJ', 'NEW JERSEY': 'NJ',
+            'NM': 'NM', 'NEW MEXICO': 'NM',
+            'NY': 'NY', 'NEW YORK': 'NY',
+            'NC': 'NC', 'NORTH CAROLINA': 'NC',
+            'ND': 'ND', 'NORTH DAKOTA': 'ND',
+            'OH': 'OH', 'OHIO': 'OH',
+            'OK': 'OK', 'OKLAHOMA': 'OK',
+            'OR': 'OR', 'OREGON': 'OR',
+            'PA': 'PA', 'PENNSYLVANIA': 'PA',
+            'RI': 'RI', 'RHODE ISLAND': 'RI',
+            'SC': 'SC', 'SOUTH CAROLINA': 'SC',
+            'SD': 'SD', 'SOUTH DAKOTA': 'SD',
+            'TN': 'TN', 'TENNESSEE': 'TN',
+            'TX': 'TX', 'TEXAS': 'TX',
+            'UT': 'UT', 'UTAH': 'UT',
+            'VT': 'VT', 'VERMONT': 'VT',
+            'VA': 'VA', 'VIRGINIA': 'VA',
+            'WA': 'WA', 'WASHINGTON': 'WA',
+            'WV': 'WV', 'WEST VIRGINIA': 'WV',
+            'WI': 'WI', 'WISCONSIN': 'WI',
+            'WY': 'WY', 'WYOMING': 'WY',
+            'DC': 'DC', 'DISTRICT OF COLUMBIA': 'DC'
+        }
+        
+        return state_mapping.get(state, state if len(state) == 2 else "")
+
+    def _is_valid_state(self, state: str) -> bool:
+        """Check if the given string is a valid US state name or abbreviation."""
+        if not state:
+            return False
+            
+        state = state.strip().upper()
+        
+        valid_states = {
+            'AL', 'ALABAMA', 'AK', 'ALASKA', 'AZ', 'ARIZONA', 'AR', 'ARKANSAS',
+            'CA', 'CALIFORNIA', 'CO', 'COLORADO', 'CT', 'CONNECTICUT', 'DE', 'DELAWARE',
+            'FL', 'FLORIDA', 'GA', 'GEORGIA', 'HI', 'HAWAII', 'ID', 'IDAHO',
+            'IL', 'ILLINOIS', 'IN', 'INDIANA', 'IA', 'IOWA', 'KS', 'KANSAS',
+            'KY', 'KENTUCKY', 'LA', 'LOUISIANA', 'ME', 'MAINE', 'MD', 'MARYLAND',
+            'MA', 'MASSACHUSETTS', 'MI', 'MICHIGAN', 'MN', 'MINNESOTA', 'MS', 'MISSISSIPPI',
+            'MO', 'MISSOURI', 'MT', 'MONTANA', 'NE', 'NEBRASKA', 'NV', 'NEVADA',
+            'NH', 'NEW HAMPSHIRE', 'NJ', 'NEW JERSEY', 'NM', 'NEW MEXICO', 'NY', 'NEW YORK',
+            'NC', 'NORTH CAROLINA', 'ND', 'NORTH DAKOTA', 'OH', 'OHIO', 'OK', 'OKLAHOMA',
+            'OR', 'OREGON', 'PA', 'PENNSYLVANIA', 'RI', 'RHODE ISLAND', 'SC', 'SOUTH CAROLINA',
+            'SD', 'SOUTH DAKOTA', 'TN', 'TENNESSEE', 'TX', 'TEXAS', 'UT', 'UTAH',
+            'VT', 'VERMONT', 'VA', 'VIRGINIA', 'WA', 'WASHINGTON', 'WV', 'WEST VIRGINIA',
+            'WI', 'WISCONSIN', 'WY', 'WYOMING', 'DC', 'DISTRICT OF COLUMBIA'
+        }
+        
+        return state in valid_states
+
     def process_row(self, text: str, row_id: Optional[str] = None, job_id: Optional[str] = None) -> Dict[str, Any]:
         """Process a single row and return enhanced classification results with job details."""
         try:
@@ -560,7 +901,10 @@ class AdvancedJobClassifier:
                     'general_category': 'other',
                     'confidence': 0.9,
                     'original_content': text,
-                    'job_details': '',  # New column for job lists
+                    'job_details': '',
+                    'job_count': '',  # No job count for addresses
+                    'city': '',       # No city extraction for addresses
+                    'state': '',      # No state extraction for addresses
                     'processing_status': 'success',
                     'extraction_method': 'address_detection'
                 }
@@ -571,6 +915,11 @@ class AdvancedJobClassifier:
                 # Extract job details from "Apply to..." section
                 job_details = self._extract_apply_to_section(text)
                 job_details_str = ', '.join(job_details) if job_details else ''
+                
+                # Extract new data: job count, city, state
+                job_count = self.extract_job_count(text)
+                city = self.extract_city(text)
+                state = self.extract_state(text)
                 
                 # Classify job category
                 category = self.classify_job_category(job_title, text)
@@ -587,7 +936,10 @@ class AdvancedJobClassifier:
                     'general_category': general_category,
                     'confidence': confidence,
                     'original_content': text,
-                    'job_details': job_details_str,  # New column for job lists
+                    'job_details': job_details_str,
+                    'job_count': job_count,  # NEW: Total number of jobs
+                    'city': city,            # NEW: City extracted from location
+                    'state': state,          # NEW: State extracted from location
                     'processing_status': 'success',
                     'extraction_method': 'ai' if self.use_ai else 'rules'
                 }
@@ -614,6 +966,9 @@ class AdvancedJobClassifier:
             'confidence': 0.0,
             'original_content': original_text,
             'job_details': '',
+            'job_count': '',     # NEW: Empty for errors
+            'city': '',          # NEW: Empty for errors
+            'state': '',         # NEW: Empty for errors
             'processing_status': 'error',
             'error_message': error_msg,
             'extraction_method': 'error'
@@ -647,7 +1002,7 @@ class AdvancedJobClassifier:
         
         # Add new columns to original DataFrame
         output_columns = ['extracted_job_title', 'job_category', 'general_category', 'confidence', 
-                         'original_content', 'job_details', 'row_id']  # Added job_details
+                         'original_content', 'job_details', 'job_count', 'city', 'state', 'row_id']  # Added new columns
         if job_id_column:
             output_columns.append('job_id')
             
