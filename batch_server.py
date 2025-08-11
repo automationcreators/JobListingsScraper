@@ -72,7 +72,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <div class="container">
         <div class="header">
             <h1>🎯 Batch Processing Job Classification System</h1>
-            <p>Advanced processing with range specification, batch control, and full content display</p>
+            <p>Advanced processing with range specification, batch control, and flexible export options</p>
         </div>
 
         <div class="section">
@@ -141,7 +141,31 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             <div id="alert-container"></div>
             <div id="stats-container"></div>
             <div id="results-content"></div>
-            <button onclick="downloadResults()" class="btn btn-success hidden" id="download-btn">💾 Download Processed CSV</button>
+            
+            <div id="download-section" class="hidden" style="margin-top: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 2px solid #dee2e6;">
+                <h4>📥 Export Options</h4>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                    <div style="text-align: center;">
+                        <h5>Complete CSV</h5>
+                        <p style="font-size: 0.9em; color: #6c757d; margin: 10px 0;">Original data + new processed columns</p>
+                        <button onclick="downloadCompleteResults()" class="btn btn-success">
+                            📊 Download Complete CSV
+                        </button>
+                    </div>
+                    <div style="text-align: center;">
+                        <h5>Processed Data Only</h5>
+                        <p style="font-size: 0.9em; color: #6c757d; margin: 10px 0;">Only the new processed columns</p>
+                        <button onclick="downloadProcessedOnly()" class="btn btn-primary">
+                            🎯 Download Processed Only
+                        </button>
+                    </div>
+                </div>
+                <div style="margin-top: 15px; padding: 10px; background: #e9ecef; border-radius: 4px; font-size: 0.85em;">
+                    <strong>ℹ️ Export Information:</strong><br>
+                    • <strong>Complete CSV</strong>: Includes all original columns plus new processed columns (job_title, job_category, general_category, confidence, job_details, etc.)<br>
+                    • <strong>Processed Only</strong>: Contains only the classification results without original data
+                </div>
+            </div>
         </div>
     </div>
 
@@ -290,7 +314,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
                     showAlert(`✅ ${actionType} completed! Processed ${result.summary.total_processed} rows`, 'success');
                     
                     if (!isTest) {
-                        document.getElementById('download-btn').classList.remove('hidden');
+                        document.getElementById('download-section').classList.remove('hidden');
                     }
                 } else {
                     showAlert(`❌ ${actionType} failed: ${result.error || 'Unknown error'}`, 'error');
@@ -389,20 +413,46 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             container.innerHTML = html;
         }
 
-        async function downloadResults() {
+        async function downloadCompleteResults() {
             if (!currentSessionId) return;
             
             try {
+                showAlert('📥 Preparing complete CSV download...', 'success');
                 const response = await fetch(`/download/${currentSessionId}`);
                 if (response.ok) {
                     const blob = await response.blob();
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `batch_processed_jobs_${currentSessionId}.csv`;
+                    a.download = `complete_processed_${currentSessionId}.csv`;
                     a.click();
                     URL.revokeObjectURL(url);
-                    showAlert('✅ Batch processed CSV downloaded successfully!', 'success');
+                    showAlert('✅ Complete CSV downloaded successfully!', 'success');
+                } else {
+                    showAlert('❌ Failed to download complete CSV', 'error');
+                }
+            } catch (error) {
+                showAlert(`❌ Download error: ${error.message}`, 'error');
+            }
+        }
+
+        async function downloadProcessedOnly() {
+            if (!currentSessionId) return;
+            
+            try {
+                showAlert('📥 Preparing processed-only CSV download...', 'success');
+                const response = await fetch(`/download-processed-only/${currentSessionId}`);
+                if (response.ok) {
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `processed_only_${currentSessionId}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showAlert('✅ Processed-only CSV downloaded successfully!', 'success');
+                } else {
+                    showAlert('❌ Failed to download processed-only CSV', 'error');
                 }
             } catch (error) {
                 showAlert(`❌ Download error: ${error.message}`, 'error');
@@ -510,17 +560,23 @@ async def process_range(
             # Store/update processed data
             if 'processed_df' not in processed_data[session_id]:
                 processed_data[session_id]['processed_df'] = df.copy()
+                # Initialize new columns with empty strings
+                for col in output_columns:
+                    if col not in processed_data[session_id]['processed_df'].columns:
+                        processed_data[session_id]['processed_df'][col] = ''
             
-            # Update the processed dataframe with new results
+            # Update the processed dataframe with new results - simplified approach
             for col in output_columns:
                 if col in results_df.columns:
-                    processed_data[session_id]['processed_df'].iloc[start_idx:end_idx, processed_data[session_id]['processed_df'].columns.get_loc(col) if col in processed_data[session_id]['processed_df'].columns else len(processed_data[session_id]['processed_df'].columns)] = results_df[col].values
-            
-            # Add columns if they don't exist
-            for col in output_columns:
-                if col not in processed_data[session_id]['processed_df'].columns:
-                    processed_data[session_id]['processed_df'][col] = ''
-                    processed_data[session_id]['processed_df'].iloc[start_idx:end_idx, processed_data[session_id]['processed_df'].columns.get_loc(col)] = results_df[col].values
+                    # Add column if it doesn't exist
+                    if col not in processed_data[session_id]['processed_df'].columns:
+                        processed_data[session_id]['processed_df'][col] = ''
+                    
+                    # Update the specific rows
+                    for i, (_, result_row) in enumerate(results_df.iterrows()):
+                        actual_idx = start_idx + i
+                        if actual_idx < len(processed_data[session_id]['processed_df']):
+                            processed_data[session_id]['processed_df'].loc[actual_idx, col] = result_row[col]
         
         successful_results = [r for r in results if r['processing_status'] == 'success']
         
@@ -544,7 +600,8 @@ async def process_range(
         }
 
 @app.get("/download/{session_id}")
-async def download_results(session_id: str):
+async def download_complete_results(session_id: str):
+    """Download complete CSV with original data + appended processed columns"""
     try:
         if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
             raise HTTPException(status_code=400, detail="No processed data found")
@@ -553,7 +610,7 @@ async def download_results(session_id: str):
         original_filename = processed_data[session_id]['filename']
         
         base_name = original_filename.replace('.csv', '')
-        output_filename = f"{base_name}_batch_processed_{session_id}.csv"
+        output_filename = f"{base_name}_complete_processed_{session_id}.csv"
         temp_file_path = f"/tmp/{output_filename}"
         
         processed_df.to_csv(temp_file_path, index=False)
@@ -565,7 +622,43 @@ async def download_results(session_id: str):
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error downloading file: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error downloading complete file: {str(e)}")
+
+@app.get("/download-processed-only/{session_id}")
+async def download_processed_only(session_id: str):
+    """Download only the processed data columns (no original data)"""
+    try:
+        if session_id not in processed_data or 'processed_df' not in processed_data[session_id]:
+            raise HTTPException(status_code=400, detail="No processed data found")
+        
+        processed_df = processed_data[session_id]['processed_df']
+        original_filename = processed_data[session_id]['filename']
+        
+        # Extract only the processed columns
+        processed_columns = ['row_id', 'extracted_job_title', 'job_category', 'general_category', 
+                           'confidence', 'job_details', 'original_content']
+        
+        # Add job_id if it exists
+        if 'job_id' in processed_df.columns:
+            processed_columns.insert(1, 'job_id')
+        
+        # Create dataframe with only processed columns
+        processed_only_df = processed_df[processed_columns].copy()
+        
+        base_name = original_filename.replace('.csv', '')
+        output_filename = f"{base_name}_processed_only_{session_id}.csv"
+        temp_file_path = f"/tmp/{output_filename}"
+        
+        processed_only_df.to_csv(temp_file_path, index=False)
+        
+        return FileResponse(
+            temp_file_path,
+            media_type='text/csv',
+            filename=output_filename
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error downloading processed-only file: {str(e)}")
 
 @app.get("/health")
 async def health_check():
