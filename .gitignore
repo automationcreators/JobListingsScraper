@@ -47,12 +47,26 @@ cover/
 
 # Virtual environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Secrets and key material
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+credentials.json
+client_secret*.json
+service-account*.json
+secrets/
 
 # IDEs
 .vscode/
@@ -78,9 +92,6 @@ Thumbs.db
 /checkpoints/
 /temp/
 /tmp/
-.env.local
-.env.development
-.env.production
 
 # Logs
 *.log

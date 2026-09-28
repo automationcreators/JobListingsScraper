@@ -1,201 +1,99 @@
-# JobListingsScraper - Advanced Job Classification System
+# JobListingsScraper
 
-🎯 **Advanced batch processing job classification system with first-sentence priority extraction, context-aware categorization, and job details extraction.**
+Local web app that classifies job-posting text already sitting in a CSV. You upload a file, pick the text column, and download a CSV with an extracted title, a category, and a confidence score. The classifier is rule-based. It does not call Indeed, LinkedIn, Google, Airtable, or an LLM.
 
-## 🚀 Features
+## Run the demo
 
-### **Core Features**
-- **First-sentence priority job title extraction** - Prioritizes job titles from "NUMBER LOCATION JOB TITLE jobs" patterns  
-- **Context-aware classification** - Uses "Apply to..." job lists for better categorization
-- **Job details extraction** - Extracts and displays job lists from Apply To sections
-- **Smart exact/general/other categorization** - Uses context to determine classification precision
-- **Location-aware pattern matching** - Handles complex formats like "76 CHANDLER, AZ AIRCRAFT PARTS jobs"
-- **Batch processing with range specification** - Process specific row ranges with resume capability
-
-### **Advanced Classification**
-- **Perfect accuracy** for aircraft/aviation/parts/detailing jobs
-- **11 specialized job categories** - Aviation Mechanic, HVAC Technician, Electrician, etc.
-- **Confidence scoring** - Accuracy assessment for each extraction
-- **Noise filtering** - Removes location names, marketing terms, and irrelevant text
-- **Address detection** - Automatically identifies and handles address-only entries
-
-### **Web Interface**
-- **Batch processing controls** - Start row, end row, batch size specification
-- **Test functionality** - Test on small samples before full processing  
-- **Batch history** - Track and rerun previous processing batches
-- **Real-time progress** - Live updates during processing
-- **Download results** - Export processed data as CSV with all new columns
-
-## 📊 System Performance
-
-- **Processing Accuracy**: 100.0%
-- **Extraction Quality**: 100.0%  
-- **Average Confidence**: 76.7%
-- **Supported Categories**: 11 specialized job types
-
-## 🛠 Quick Start
-
-### Installation
+No API keys. No `.env` file.
 
 ```bash
-# Clone the repository
-git clone https://github.com/YourUsername/JobListingsScraper.git
-cd JobListingsScraper
-
-# Install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-```
-
-### Usage
-
-```bash
-# Start the advanced batch processing server
 python3 batch_server.py
 ```
 
-Open your browser to `http://localhost:8000` and:
+Open `http://127.0.0.1:8000`.
 
-1. Upload a CSV file with job posting text
-2. Select text column and optional job ID column  
-3. Specify processing range (start row, end row, batch size)
-4. Test on a small sample first
-5. Process full dataset
-6. Download results with new columns
+1. Upload a CSV you are allowed to process. The repo does not ship a customer file.
+2. Select the column that holds the posting text. A job-id column is optional.
+3. Set a row range. Run a small range before a full file.
+4. Download the processed CSV from the page.
 
-## 📋 Output Columns
-
-The system adds these new columns to your CSV:
-
-- `extracted_job_title` - Accurately extracted job title
-- `job_category` - Classified category (Aviation Mechanic, Electrician, etc.)  
-- `general_category` - Precision level (exact, general, other)
-- `confidence` - Accuracy confidence score (0.0 to 1.0)
-- `job_details` - **NEW**: Extracted job lists from "Apply to..." sections
-- `original_content` - Full job posting text for reference
-- `row_id` - Row number for easy tracking
-
-## 🎯 Classification Categories
-
-### Exact Match Categories
-- HVAC Technician
-- Security Guard  
-- Registered Nurse
-- Licensed Practical Nurse
-- Veterinary Assistant
-- Dental Assistant
-- CDL Driver
-- Speech Pathologist
-- Aviation Mechanic
-- Plumber
-- Electrician
-- Welder
-
-### Special Handling
-- **Aircraft/Aviation jobs** → Aviation Mechanic category
-- **Electronics Installation & Repair** → Electrician (exact match)
-- **Generic terms** like "Aircraft", "Airport" → General classification
-- **Location prefixes** automatically handled (e.g., "CHANDLER, AZ AIRCRAFT PARTS")
-
-## 📁 Project Structure
-
-```
-JobListingsScraper/
-├── src/
-│   ├── core/
-│   │   ├── advanced_classifier.py    # Main advanced classification engine
-│   │   ├── enhanced_classifier.py    # Previous enhanced version
-│   │   └── mvp_classifier.py        # Original MVP version
-│   ├── scrapers/                     # Future web scraping modules
-│   ├── utils/                        # Utility functions
-│   └── web/                          # Web interface components
-├── tests/                            # Test files and sample data
-├── batch_server.py                   # Main batch processing server
-├── requirements.txt                  # Python dependencies
-├── CLAUDE.md                         # Development documentation
-└── README.md                         # This file
-```
-
-## 🧪 Testing
-
-Run comprehensive tests to verify system accuracy:
+`python3 -m pytest` is not wired to a `tests/` package. The `test_*.py` scripts at the repo root are runnable examples against synthetic strings:
 
 ```bash
-# Test advanced classifier with problematic examples
 python3 test_advanced_classifier.py
-
-# Run comprehensive final system test  
 python3 test_final_advanced_system.py
-
-# Test CSV processing functionality
-python3 test_csv_processing.py
 ```
 
-## 📈 Example Results
+### Environment variables
 
-### Before (Problems):
-- "116 Aircraft jobs..." → Extracted: "Aerospace Technician" ❌  
-- "76 CHANDLER, AZ AIRCRAFT PARTS..." → Extracted: "Az" ❌
-- "Airport jobs..." → Category: Other ❌
+`.env.example` lists names only. Every value in that file is a placeholder (`REDACTED`, `appEXAMPLE`, `127.0.0.1`). The current servers hardcode `host="0.0.0.0"` and `port=8000` and never call `os.environ` or `python-dotenv`. Filling in `.env` changes nothing until someone wires it.
 
-### After (Advanced System): 
-- "116 Aircraft jobs..." → Extracted: "Aircraft", Category: Aviation Mechanic (general) ✅
-- "76 CHANDLER, AZ AIRCRAFT PARTS..." → Extracted: "Aircraft Parts", Category: Aviation Mechanic (exact) ✅  
-- "Airport jobs..." → Extracted: "Airport", Category: Aviation Mechanic (general) ✅
+If you copy the example, keep secrets out of git:
 
-## 🔧 Configuration
-
-### Environment Variables
-Set these in your `.env` file (optional):
 ```bash
-# Server configuration
-HOST=localhost
-PORT=8000
-
-# Processing configuration  
-DEFAULT_BATCH_SIZE=50
-MAX_BATCH_SIZE=1000
+cp .env.example .env
 ```
 
-### Advanced Options
+`.env` is gitignored. `.env.example` is the only env file that belongs in the repo.
 
-The system supports various processing modes:
+## What you get back
 
-1. **First-sentence priority**: Extracts job titles from "NUMBER JOB TITLE jobs" patterns
-2. **Context-aware classification**: Uses Apply To job lists for better categorization  
-3. **Location handling**: Processes "CITY, STATE JOB TITLE" formats correctly
-4. **Batch processing**: Handle large datasets with range specification
+`batch_server.py` adds columns such as:
 
-## 📊 API Endpoints
+- `extracted_job_title`
+- `job_category`
+- `general_category` (`exact`, `general`, or `other`)
+- `confidence` (0.0 to 1.0)
+- `job_details` (text pulled from "Apply to..." style lines)
+- `original_content`
+- `row_id`
 
-- `GET /` - Web interface
-- `POST /analyze-csv` - Upload and analyze CSV structure
-- `POST /process-range` - Process specific row ranges
-- `GET /download/{session_id}` - Download processed results
-- `GET /health` - System status and features
+Categories covered by the rules include HVAC Technician, Security Guard, Registered Nurse, Licensed Practical Nurse, Veterinary Assistant, Dental Assistant, CDL Driver, Speech Pathologist, Aviation Mechanic, Plumber, Electrician, and Welder.
 
-## 🤝 Contributing
+## Which server to start
 
-This is an advanced job classification system. For improvements:
+| Command | What it is |
+| --- | --- |
+| `python3 batch_server.py` | Current UI. Row ranges, batch history, template save/load. |
+| `python3 enhanced_server.py` | Older enhanced classifier UI. |
+| `python3 simple_server.py` | Smaller inline classifier. |
+| `python3 run_mvp.py` | Loads `src/web/mvp_app.py` (needs the `src` layout on `PYTHONPATH`, which the script sets). |
 
-1. Fork the repository
-2. Create a feature branch
-3. Add tests for new functionality  
-4. Submit a pull request
+Health check after a server is up: `curl http://127.0.0.1:8000/health`.
 
-## 📝 License
+## Demo vs production
 
-MIT License - see LICENSE file for details
+Safe to show on a laptop: upload your own CSV, classify it locally, download the result. Nothing in this repo needs a live third-party key for that path.
 
-## 🎉 Success Stories
+Still local-demo software:
 
-✅ **100% accuracy** on all test cases  
-✅ **Perfect handling** of complex job posting formats  
-✅ **Context-aware classification** using job lists  
-✅ **Location-aware extraction** with state/city prefixes  
-✅ **Real-time batch processing** with range specification  
+- The process listens on `0.0.0.0:8000` with no authentication, no CSRF protection, and no upload size cap.
+- Session data lives in process memory and, for the batch server, as pickle and JSON under `data/`. Those files can contain the full text of whatever CSV you uploaded.
+- `*.csv`, `*.xlsx`, `*.json`, `data/`, `exports/`, and `checkpoints/` are gitignored so a normal commit does not pick up uploads. Do not force-add them.
+- Google API, Airtable, Playwright, and SQLAlchemy are pinned in `requirements.txt` and are unused by the servers. There is no Sheets sync, no Airtable sync, and no job-board scraper in this tree.
+- `extract_job_title_ai` in `src/core/enhanced_classifier.py` returns `None`. It is a comment stub, not a model call.
+- Accuracy numbers in older notes came from hand-written fixture strings in the `test_*.py` files. They are not a held-out evaluation.
 
----
+## Layout
 
-**Ready for production use!** 🚀
+```
+batch_server.py                 # server to demo
+enhanced_server.py
+simple_server.py
+run_mvp.py
+src/core/advanced_classifier.py
+src/core/enhanced_classifier.py
+src/core/mvp_classifier.py
+src/utils/storage.py            # local pickle/JSON sessions
+src/utils/template_manager.py
+src/web/mvp_app.py
+src/web/templates/index.html
+.env.example                    # placeholders only
+```
 
-Access the system at `http://localhost:8000` after running `python3 batch_server.py`
+## License
+
+MIT. See `LICENSE`.
